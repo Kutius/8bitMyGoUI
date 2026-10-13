@@ -1,0 +1,56 @@
+# Keeps this mirror level with the upstream Gitea repository.
+#
+# This file is the mirror's only local addition; every other path is upstream's,
+# byte for byte. Each run fetches upstream, rebases that single commit on top and
+# pushes, so the branch stays linear: upstream's history plus one commit.
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # daily, 03:17 UTC (11:17 UTC+8)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check the token may push
+        run: |
+          # The repository's permissions object reports push:false for an
+          # installation token even when it may push, so ask the remote instead.
+          if ! git push --dry-run origin "HEAD:refs/heads/sync-check"; then
+            echo "::error::GITHUB_TOKEN cannot push. Set Settings > Actions > General > Workflow permissions to 'Read and write'."
+            exit 1
+          fi
+          echo "The token may push."
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://git.zacharyzhang.com/ZacharyZhang-NY/8bitMyGoUI
+          git fetch --prune --tags upstream '+refs/heads/*:refs/remotes/upstream/*'
+
+      - name: Rebase onto upstream
+        run: |
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already level with upstream."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rebase upstream/main
+
+      - name: Push
+        run: |
+          git push --force-with-lease origin main
+          git push origin --tags
